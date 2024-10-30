@@ -173,3 +173,48 @@ func (that *Pool) DefaultProducer(params ...interface{}) {
 func (that *Pool) RegisterDefaultHandlerFunc(handler func(context.Context, Msg) *RespMsg) {
 	that.RegisterHandlerFunc(DefaultMsgType, handler)
 }
+
+// Do 执行特定任务的函数，使用任务池进行管理并行处理
+// 该函数接收一个上下文、一个无符号整数、一个处理器函数和一组可变参数
+// 返回一个响应消息切片
+func Do(ctx context.Context, num uint, handler func(context.Context, Msg) *RespMsg, params ...interface{}) []*RespMsg {
+	// 创建并初始化一个任务池
+	p := NewPool(ctx, num)
+	// 注册默认的处理器函数到任务池
+	p.RegisterDefaultHandlerFunc(handler)
+	// 将参数加入到默认的生产者中，触发任务的生成
+	p.DefaultProducer(params...)
+	// 等待所有任务完成，并返回结果切片
+	return p.Wait()
+}
+
+// FilterResults 根据指定消息类型筛选响应消息列表。
+// 该函数遍历响应消息列表，寻找与指定消息类型相匹配的消息，并收集这些消息的内容。
+// 如果某条匹配的消息带有错误信息，则立即返回错误并附带之前收集的所有内容。
+// 参数:
+//   t - 要筛选的消息类型。
+//   respMsgList - 响应消息列表，包含不同类型的消息。
+// 返回值:
+//   []interface{} - 收集到的消息内容，具体类型根据实际情况而定。
+//   error - 如果有消息携带错误信息，则返回该错误，否则返回nil。
+func FilterResults(t MsgType, respMsgList []*RespMsg) ([]interface{}, error) {
+	// 初始化收集到的消息内容列表。
+	rets := make([]interface{}, 0)
+	// 初始化错误变量，用于记录遇到的第一个错误。
+	var err error
+	// 遍历响应消息列表。
+	for _, msg := range respMsgList {
+		// 检查消息类型是否与目标类型匹配。
+		if msg.Type == t {
+			// 检查消息是否带有错误信息，如果有，则记录错误并提前返回。
+			if msg.Error != nil {
+				err = msg.Error
+				return rets, err
+			}
+			// 将匹配消息的内容添加到结果列表中。
+			rets = append(rets, msg.Content)
+		}
+	}
+	// 如果没有遇到错误，返回收集到的消息内容列表和nil错误。
+	return rets, nil
+}

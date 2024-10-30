@@ -30,6 +30,13 @@ func TestNewPool(t *testing.T) {
 	if len(results) != len(msgList) {
 		t.Errorf("results length is not equal to params length")
 	}
+	r1, err := FilterResults(DefaultMsgType, results)
+	if err != nil {
+		t.Errorf("filter results error: %v", err)
+	}
+	if len(r1) != 3 {
+		t.Errorf("filter results length is not equal to params length")
+	}
 }
 
 func TestNewPool_Default(t *testing.T) {
@@ -52,4 +59,11 @@ func TestNewPool_Default(t *testing.T) {
 		t.Errorf("results length is not equal to params length")
 	}
 
+}
+
+func TestDo(t *testing.T) {
+	Do(context.Background(), 5, func(ctx context.Context, msg Msg) *RespMsg {
+		fmt.Printf("msg:%+v, do something\n", msg)
+		return nil
+	}, []interface{}{"1", "2", "3", "4", "5", "6", "7"}...)
 }
