@@ -67,3 +67,25 @@ func TestGo_WithTimeout(t *testing.T) {
 	}
 	fmt.Printf("耗时：%0.2f\n", time.Since(startTime).Seconds())
 }
+
+func TestPool(t *testing.T) {
+	ctx := context.Background()
+	// 创建并初始化一个任务池
+	p := NewPool(ctx, WithSize(5))
+	// 注册默认的处理器函数到任务池
+	p.RegisterHandleFunc(func(ctx context.Context, msg interface{}) (interface{}, error) {
+		fmt.Printf("msg:%+v, do something\n", msg)
+		// 这里可能执行调用第三方接口或数据库读写操作
+		time.Sleep(time.Second * 1)
+		return msg, nil
+	})
+	// 将参数加入到默认的生产者中，触发任务的生成
+	p.Producer([]interface{}{"liming", "stone", "alice", "mery", "miss", "lucy", "foo", "nvd"}...)
+	// 等待所有任务完成，并返回结果切片
+	results, err := p.Wait()
+	if err != nil {
+		t.Errorf("err: %v", err)
+		return
+	}
+	fmt.Printf("results: %+v\n", results)
+}

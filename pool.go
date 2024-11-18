@@ -6,6 +6,34 @@ import (
 	"sync"
 )
 
+// MPoolInterfacer 协程池接口定义
+type MPoolInterfacer interface {
+	// RegisterHandleFunc 注册消费者处理函数
+	RegisterHandleFunc(handler func(ctx context.Context, msg interface{}) (result interface{}, err error))
+	// Producer 消息生产者
+	Producer(msgs ...interface{})
+	// Wait 等待协程处理完成，返回处理结果列表和异常信息
+	Wait() (results []interface{}, err error)
+}
+
+var _ MPoolInterfacer = &Pool{}
+
+type Option func(p *Pool)
+
+// WithIgnoreErr 处理过程是否忽略异常错误
+func WithIgnoreErr() Option {
+	return func(p *Pool) {
+		p.ignoreErr = true
+	}
+}
+
+// WithSize 配置pool的size
+func WithSize(size uint) Option {
+	return func(p *Pool) {
+		p.num = size
+	}
+}
+
 type Pool struct {
 	handlerFunc  func(ctx context.Context, msg interface{}) (interface{}, error)
 	justDoItFunc func(ctx context.Context, msg interface{})
@@ -23,17 +51,25 @@ type Pool struct {
 // NewPool 创建一个新的任务处理池。
 // 该函数接收一个context和一个表示池中并发工作器数量的uint。
 // 返回值是一个指向Pool的指针。
-func NewPool(ctx context.Context, num uint) *Pool {
+func NewPool(ctx context.Context, options ...Option) *Pool {
 	// 初始化Pool结构体实例。
 	instance := &Pool{
-		msgChan:    make(chan interface{}, 2*num), // 创建一个固定容量的消息通道。
-		msgWg:      sync.WaitGroup{},              // 初始化用于同步消息处理的WaitGroup。
-		num:        num,                           // 设置工作器数量。
-		resultChan: make(chan interface{}, 2*num), // 创建一个固定容量的结果通道。
-		resultList: make([]interface{}, 0),        // 初始化存储结果的切片。
-		resultWg:   sync.WaitGroup{},              // 初始化用于同步结果处理的WaitGroup。
-		errMux:     sync.RWMutex{},
+		msgWg:      sync.WaitGroup{},       // 初始化用于同步消息处理的WaitGroup。
+		resultList: make([]interface{}, 0), // 初始化存储结果的切片。
+		resultWg:   sync.WaitGroup{},       // 初始化用于同步结果处理的WaitGroup。
+		errMux:     sync.RWMutex{},         // err的读写锁
 	}
+	// 初始化参数
+	for _, option := range options {
+		option(instance)
+	}
+	if instance.num == 0 {
+		instance.num = 10
+	}
+	// 创建一个固定容量的消息通道
+	instance.msgChan = make(chan interface{}, 2*instance.num)
+	// 创建一个固定容量的结果通道
+	instance.resultChan = make(chan interface{}, 2*instance.num)
 	// 启动消息消费者协程，负责从消息通道中消费消息并进行处理。
 	instance.consumer(ctx)
 	// 启动结果获取协程，负责从结果通道中获取并处理结果。
@@ -76,6 +112,11 @@ func (that *Pool) Wait() ([]interface{}, error) {
 	that.resultWg.Wait()
 	// 返回解析后的结果列表
 	return that.resultList, that.err
+}
+
+// RegisterHandleFunc 注册处理函数
+func (that *Pool) RegisterHandleFunc(handler func(context.Context, interface{}) (interface{}, error)) {
+	that.handlerFunc = handler
 }
 
 // getResult 从 resultChan 中接收结果消息，并将其添加到 resultList 中
@@ -159,9 +200,7 @@ func (that *Pool) setError(err error) {
 // 当处理过程出现异常会继续执行处理，直至任务处理完成
 func Do(ctx context.Context, num uint, handler func(context.Context, interface{}), params ...interface{}) {
 	// 创建并初始化一个任务池
-	p := NewPool(ctx, num)
-	// 忽视处理错误，不返回结果列表，just do it
-	p.ignoreErr = true
+	p := NewPool(ctx, WithSize(num), WithIgnoreErr())
 	// 注册默认的处理器函数到任务池
 	p.justDoItFunc = handler
 	// 将参数加入到默认的生产者中，触发任务的生成
@@ -178,9 +217,9 @@ func Do(ctx context.Context, num uint, handler func(context.Context, interface{}
 // 返回一个响应消息切片和错误信息
 func Go(ctx context.Context, num uint, handler func(context.Context, interface{}) (interface{}, error), params ...interface{}) ([]interface{}, error) {
 	// 创建并初始化一个任务池
-	p := NewPool(ctx, num)
+	p := NewPool(ctx, WithSize(num))
 	// 注册默认的处理器函数到任务池
-	p.handlerFunc = handler
+	p.RegisterHandleFunc(handler)
 	// 将参数加入到默认的生产者中，触发任务的生成
 	p.Producer(params...)
 	// 等待所有任务完成，并返回结果切片
