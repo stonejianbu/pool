@@ -47,19 +47,13 @@ func (that *Worker) do(ctx context.Context) {
 				that.p.workWg.Done()
 			}
 		}()
-		for {
-			select {
-			case arg, ok := <-that.workChan:
-				if !ok {
-					return
-				}
-				err := that.p.handlerFunc(ctx, arg)
-				if err != nil {
-					that.p.setError(err)
-				}
-				that.p.putWorker(that)
-				that.p.workWg.Done()
+		for arg := range that.workChan {
+			err := that.p.handlerFunc(ctx, arg)
+			if err != nil {
+				that.p.setError(err)
 			}
+			that.p.putWorker(that)
+			that.p.workWg.Done()
 		}
 	}()
 }

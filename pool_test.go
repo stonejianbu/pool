@@ -3,11 +3,14 @@ package pool
 import (
 	"context"
 	"fmt"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 )
 
 func handleFunc(ctx context.Context, msg interface{}) error {
+	time.Sleep(time.Millisecond * 10)
 	return nil
 }
 
@@ -38,4 +41,51 @@ func TestPool(t *testing.T) {
 		t.Errorf("err: %v", err)
 		return
 	}
+}
+
+func Benchmark_Pool_1(b *testing.B) {
+	num := 1000000
+	taskParams := make([]interface{}, num)
+	ctx := context.Background()
+	gNum := uint(num / 10)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		Go(ctx, gNum, handleFunc, taskParams...)
+	}
+}
+
+func Benchmark_Pool_2(b *testing.B) {
+	num := 1000000
+	var m runtime.MemStats
+	taskParams := make([]interface{}, num)
+	ctx := context.Background()
+	gNum := uint(num / 10)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		Go(ctx, gNum, handleFunc, taskParams...)
+	}
+	runtime.ReadMemStats(&m)
+	afterAlloc := m.Alloc
+	b.Logf("pool Memory allocated: %d bytes\n", afterAlloc)
+}
+
+func Benchmark_Goroutine(b *testing.B) {
+	num := 1000000
+	var m runtime.MemStats
+	taskParams := make([]interface{}, num)
+	ctx := context.Background()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		wg := sync.WaitGroup{}
+		for _, param := range taskParams {
+			wg.Add(1)
+			go func(param interface{}) {
+				defer wg.Done()
+				handleFunc(ctx, param)
+			}(param)
+		}
+	}
+	runtime.ReadMemStats(&m)
+	afterAlloc := m.Alloc
+	b.Logf("goroutine Memory allocated: %d bytes\n", afterAlloc)
 }
