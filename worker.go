@@ -40,13 +40,12 @@ func (that *Worker) send(arg interface{}) {
 
 // Do start to do the task
 func (that *Worker) do(ctx context.Context) {
-	that.p.workerWg.Add(1)
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
 				that.p.setError(fmt.Errorf("panic recover err: %v", err))
+				that.p.workWg.Done()
 			}
-			that.p.workerWg.Done()
 		}()
 		for {
 			select {
@@ -59,11 +58,7 @@ func (that *Worker) do(ctx context.Context) {
 					that.p.setError(err)
 				}
 				that.p.putWorker(that)
-			default:
-				if len(that.p.release) > 0 {
-					that.close()
-					break
-				}
+				that.p.workWg.Done()
 			}
 		}
 	}()

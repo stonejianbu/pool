@@ -2,7 +2,6 @@ package pool
 
 import (
 	"context"
-	"log"
 	"sync"
 )
 
@@ -30,10 +29,8 @@ type Pool struct {
 	err         error
 	errLock     sync.Mutex
 	ignoreErr   bool
-	logger      log.Logger
 	workerChan  chan *Worker
-	workerWg    sync.WaitGroup
-	lock        sync.Mutex
+	workWg      sync.WaitGroup
 	release     chan struct{}
 }
 
@@ -41,7 +38,7 @@ type Pool struct {
 func NewPool(ctx context.Context, options ...Option) *Pool {
 	// init a pool instance
 	instance := &Pool{
-		workerWg:  sync.WaitGroup{},
+		workWg:    sync.WaitGroup{},
 		errLock:   sync.Mutex{},
 		num:       5,
 		release:   make(chan struct{}, 1),
@@ -58,12 +55,17 @@ func NewPool(ctx context.Context, options ...Option) *Pool {
 
 // initWorkers init workers
 func (that *Pool) initWorkers(ctx context.Context) {
-	for i := 0; i < int(that.num); i++ {
-		worker := newWorker(that)
-		worker.do(ctx)
-		log.Printf("init worker\n")
-		that.putWorker(worker)
-	}
+	that.workWg.Add(1)
+	go func() {
+		defer func() {
+			that.workWg.Done()
+		}()
+		for i := 0; i < int(that.num); i++ {
+			worker := newWorker(that)
+			worker.do(ctx)
+			that.putWorker(worker)
+		}
+	}()
 }
 
 // getWorker get a available worker to run the tasks.
@@ -75,7 +77,6 @@ func (that *Pool) getWorker(ctx context.Context) *Worker {
 			that.setError(ctx.Err())
 			return nil
 		case worker = <-that.workerChan:
-			log.Printf("get a worker\n")
 			return worker
 		}
 	}
@@ -94,6 +95,7 @@ func (that *Pool) Submit(ctx context.Context, msgs ...interface{}) {
 		}
 		// get a worker to do the task
 		if worker := that.getWorker(ctx); worker != nil {
+			that.workWg.Add(1)
 			worker.send(msg)
 		}
 	}
@@ -104,7 +106,7 @@ func (that *Pool) Wait() error {
 	if len(that.release) == 0 {
 		that.release <- struct{}{}
 	}
-	that.workerWg.Wait()
+	that.workWg.Wait()
 	return that.err
 }
 
