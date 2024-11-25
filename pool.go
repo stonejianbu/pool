@@ -9,7 +9,7 @@ type HandlerFunc func(ctx context.Context, arg interface{}) error
 
 type Option func(p *Pool)
 
-// WithIgnoreErr 处理过程是否忽略异常错误
+// WithIgnoreErr ignore error
 func WithIgnoreErr() Option {
 	return func(p *Pool) {
 		p.ignoreErr = true
@@ -19,13 +19,13 @@ func WithIgnoreErr() Option {
 // WithSize set the size of the pool
 func WithSize(size uint) Option {
 	return func(p *Pool) {
-		p.num = size
+		p.capacity = int32(size)
 	}
 }
 
 type Pool struct {
 	handlerFunc HandlerFunc
-	num         uint
+	capacity    int32
 	err         error
 	errLock     sync.Mutex
 	ignoreErr   bool
@@ -40,14 +40,14 @@ func NewPool(ctx context.Context, options ...Option) *Pool {
 	instance := &Pool{
 		workWg:    sync.WaitGroup{},
 		errLock:   sync.Mutex{},
-		num:       5,
+		capacity:  5,
 		release:   make(chan struct{}, 1),
 		ignoreErr: false,
 	}
 	for _, option := range options {
 		option(instance)
 	}
-	instance.workerChan = make(chan *Worker, instance.num)
+	instance.workerChan = make(chan *Worker, instance.capacity)
 	// init workers
 	go instance.initWorkers(ctx)
 	return instance
@@ -55,17 +55,11 @@ func NewPool(ctx context.Context, options ...Option) *Pool {
 
 // initWorkers init workers
 func (that *Pool) initWorkers(ctx context.Context) {
-	that.workWg.Add(1)
-	go func() {
-		defer func() {
-			that.workWg.Done()
-		}()
-		for i := 0; i < int(that.num); i++ {
-			worker := newWorker(that)
-			worker.do(ctx)
-			that.putWorker(worker)
-		}
-	}()
+	for i := 0; i < int(that.capacity); i++ {
+		worker := newWorker(that)
+		worker.do(ctx)
+		that.putWorker(worker)
+	}
 }
 
 // getWorker get a available worker to run the tasks.
